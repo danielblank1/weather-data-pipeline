@@ -1,0 +1,29 @@
+# ============================================================
+# Bruin project configuration
+# Defines environments and database connections
+# ============================================================
+
+default_environment: default
+
+environments:
+  default:
+    connections:
+      postgres:
+        - name: "weather_warehouse"
+          username: "weather"
+          password: "weather_pipeline_2026"
+          host: "localhost"
+          port: 5432
+          database: "weather_warehouse"
+          ssl_mode: "disable"
+
+  docker:
+    connections:
+      postgres:
+        - name: "weather_warehouse"
+          username: "weather"
+          password: "weather_pipeline_2026"
+          host: "postgres"
+          port: 5432
+          database: "weather_warehouse"
+          ssl_mode: "disable"

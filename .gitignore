@@ -1,0 +1,32 @@
+# Environment
+.env
+*.pyc
+__pycache__/
+.venv/
+venv/
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/.terraform.lock.hcl
+
+# dbt
+dbt/weather_dbt/target/
+dbt/weather_dbt/dbt_packages/
+dbt/weather_dbt/logs/
+
+# Data
+*.csv
+*.csv.gz
+data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

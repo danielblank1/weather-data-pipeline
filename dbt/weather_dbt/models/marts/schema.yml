@@ -1,0 +1,40 @@
+version: 2
+
+models:
+  - name: mart_daily_weather
+    description: >
+      Primary analytics table: daily weather observations joined with
+      station metadata, enriched with rolling averages and extreme flags.
+    columns:
+      - name: station_id
+        tests:
+          - not_null
+      - name: obs_date
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - station_id
+            - obs_date
+
+  - name: mart_monthly_summary
+    description: >
+      Monthly aggregated weather statistics per station.
+      Used for trend dashboards and seasonal analysis.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - station_id
+            - obs_year
+            - obs_month
+
+  - name: mart_prediction_features
+    description: >
+      Feature-engineered table for weather prediction ML models.
+      Includes lag features, rolling stats, and seasonal encodings.
+      Target: next-day average temperature.
+    columns:
+      - name: target_tavg_next_day
+        tests:
+          - not_null
