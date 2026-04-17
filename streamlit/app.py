@@ -386,15 +386,7 @@ year_range = (2020, CURRENT_YEAR)
 stations_meta_loaded = raw_stations_loaded()
 
 if not stations_meta_loaded:
-    # Seed station metadata from bundled DuckDB
-    _seed_path = os.path.join(os.path.dirname(__file__), "ghcnd-stations.duckdb")
-    try:
-        conn.execute(f"ATTACH '{_seed_path}' AS seed (READ_ONLY)")
-        conn.execute("INSERT INTO raw.ghcn_stations SELECT * FROM seed.raw.ghcn_stations")
-        conn.execute("DETACH seed")
-        stations_meta_loaded = True
-    except Exception as e:
-        st.sidebar.error(f"Failed to load station metadata: {e}")
+    st.sidebar.warning("No station metadata loaded yet. Use the Ingest button or run ingestion from the CLI.")
 
 if stations_meta_loaded:
     # ── Unified location flow: Country → State → City/Station ──
