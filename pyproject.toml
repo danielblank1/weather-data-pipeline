@@ -26,13 +26,6 @@ streamlit = ">=1.32.0"
 plotly = ">=5.20.0"
 geopy = ">=2.4.0"
 
-[tool.poetry.group.kafka]
-optional = true
-
-[tool.poetry.group.kafka.dependencies]
-kafka-python = ">=2.0.2"
-psycopg2-binary = ">=2.9.9"
-
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.15.11"

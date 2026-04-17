@@ -82,7 +82,7 @@ Ingestion downloads per-station `.dly` files (~200KB each) rather than full year
 ### 1. Install dependencies
 
 ```bash
-poetry install --with ingestion,streamlit,kafka
+poetry install --with ingestion,streamlit
 ```
 
 ### 2. Start services
@@ -209,7 +209,7 @@ GitHub Actions runs on every push to `main` and on pull requests:
 
 ```bash
 # Install all dependencies (including dev tools)
-poetry install --with ingestion,streamlit,kafka
+poetry install --with ingestion,streamlit
 
 # Lint
 poetry run ruff check .

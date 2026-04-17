@@ -15,7 +15,7 @@ Ingests NOAA GHCN-Daily weather data for any user-selected location (US state or
 
 ## Critical operational notes
 - DuckDB file lives in a named Docker volume (`duckdb_data`) mounted at `/data/weather.duckdb` inside containers.
-- **Poetry** manages all Python dependencies. Use `poetry install --with ingestion,streamlit,kafka` to set up the local venv, and `poetry run` or `poetry shell` to execute scripts.
+- **Poetry** manages all Python dependencies. Use `poetry install --with ingestion,streamlit` to set up the local venv, and `poetry run` or `poetry shell` to execute scripts.
 - Docker containers still use pip — `poetry export` generates per-container `requirements.txt` files from the lock file.
 
 ## Data
@@ -36,7 +36,7 @@ docker compose down -v         # full reset including data
 
 ### Install Python dependencies (WSL, first time)
 ```bash
-poetry install --with ingestion,streamlit,kafka
+poetry install --with ingestion,streamlit
 ```
 
 ### Run ingestion (WSL)

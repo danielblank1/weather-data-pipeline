@@ -80,16 +80,3 @@ duckdb-shell: ## Open a DuckDB shell on the data file
 clean: ## Remove all volumes and data (DESTRUCTIVE)
 	docker compose down -v
 	@echo "All volumes removed."
-
-# ---------------------------------------------------------------------------
-# Terraform
-# ---------------------------------------------------------------------------
-
-tf-init: ## Initialize Terraform
-	cd terraform && terraform init
-
-tf-plan: ## Plan Terraform changes
-	cd terraform && terraform plan
-
-tf-apply: ## Apply Terraform changes
-	cd terraform && terraform apply -auto-approve
