@@ -12,17 +12,9 @@ Usage:
 """
 
 import argparse
-import sys
 
 from pyspark.sql import SparkSession, Window
 from pyspark.sql import functions as F
-from pyspark.sql.types import (
-    DoubleType,
-    IntegerType,
-    StringType,
-    StructField,
-    StructType,
-)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -39,8 +31,7 @@ JDBC_PROPS = {
 def get_spark():
     """Initialize Spark session with PostgreSQL JDBC driver."""
     return (
-        SparkSession.builder
-        .appName("WeatherFeatureEngineering")
+        SparkSession.builder.appName("WeatherFeatureEngineering")
         .config(
             "spark.jars.packages",
             "org.postgresql:postgresql:42.7.1",
@@ -54,33 +45,28 @@ def get_spark():
 # Feature computations
 # ---------------------------------------------------------------------------
 
+
 def compute_historical_normals(df):
     """
     Compute historical normals: average temperature and precipitation
     for each station + day-of-year across all available years.
     These serve as baseline expectations for anomaly detection.
     """
-    normals = (
-        df.groupBy("station_id", "day_of_year")
-        .agg(
-            F.avg("tavg_derived_celsius").alias("hist_normal_temp"),
-            F.stddev("tavg_derived_celsius").alias("hist_temp_stddev"),
-            F.avg("precipitation_mm").alias("hist_normal_precip"),
-            F.count("*").alias("years_of_data"),
-        )
+    normals = df.groupBy("station_id", "day_of_year").agg(
+        F.avg("tavg_derived_celsius").alias("hist_normal_temp"),
+        F.stddev("tavg_derived_celsius").alias("hist_temp_stddev"),
+        F.avg("precipitation_mm").alias("hist_normal_precip"),
+        F.count("*").alias("years_of_data"),
     )
 
     # Join back and compute anomaly score
-    df_with_normals = df.join(
-        normals, on=["station_id", "day_of_year"], how="left"
-    )
+    df_with_normals = df.join(normals, on=["station_id", "day_of_year"], how="left")
 
     df_with_normals = df_with_normals.withColumn(
         "temp_anomaly",
         F.when(
             F.col("hist_temp_stddev") > 0,
-            (F.col("tavg_derived_celsius") - F.col("hist_normal_temp"))
-            / F.col("hist_temp_stddev"),
+            (F.col("tavg_derived_celsius") - F.col("hist_normal_temp")) / F.col("hist_temp_stddev"),
         ).otherwise(0.0),
     )
 
@@ -110,18 +96,16 @@ def compute_consecutive_features(df):
     # Running group ID for consecutive precip days
     df = df.withColumn(
         "precip_group",
-        F.sum(
-            F.when(F.col("precip_flag") != F.lag("precip_flag", 1).over(station_date_window), 1)
-            .otherwise(0)
-        ).over(station_date_window),
+        F.sum(F.when(F.col("precip_flag") != F.lag("precip_flag", 1).over(station_date_window), 1).otherwise(0)).over(
+            station_date_window
+        ),
     )
 
     # Count within group
     group_window = Window.partitionBy("station_id", "precip_group").orderBy("obs_date")
     df = df.withColumn(
         "consecutive_precip_days",
-        F.when(F.col("precip_flag") == 1, F.row_number().over(group_window))
-        .otherwise(0),
+        F.when(F.col("precip_flag") == 1, F.row_number().over(group_window)).otherwise(0),
     )
 
     # Heat wave: 3+ consecutive days with tmax > 35°C
@@ -131,16 +115,14 @@ def compute_consecutive_features(df):
     )
     df = df.withColumn(
         "heat_group",
-        F.sum(
-            F.when(F.col("heat_flag") != F.lag("heat_flag", 1).over(station_date_window), 1)
-            .otherwise(0)
-        ).over(station_date_window),
+        F.sum(F.when(F.col("heat_flag") != F.lag("heat_flag", 1).over(station_date_window), 1).otherwise(0)).over(
+            station_date_window
+        ),
     )
     heat_group_window = Window.partitionBy("station_id", "heat_group").orderBy("obs_date")
     df = df.withColumn(
         "heat_wave_day_count",
-        F.when(F.col("heat_flag") == 1, F.row_number().over(heat_group_window))
-        .otherwise(0),
+        F.when(F.col("heat_flag") == 1, F.row_number().over(heat_group_window)).otherwise(0),
     )
     df = df.withColumn(
         "is_heat_wave",
@@ -158,12 +140,9 @@ def compute_seasonal_departure(df):
     Compute how much each observation departs from the station's
     seasonal (monthly) average across all years.
     """
-    monthly_avg = (
-        df.groupBy("station_id", "obs_month")
-        .agg(
-            F.avg("tavg_derived_celsius").alias("monthly_avg_temp"),
-            F.avg("precipitation_mm").alias("monthly_avg_precip"),
-        )
+    monthly_avg = df.groupBy("station_id", "obs_month").agg(
+        F.avg("tavg_derived_celsius").alias("monthly_avg_temp"),
+        F.avg("precipitation_mm").alias("monthly_avg_precip"),
     )
 
     df = df.join(monthly_avg, on=["station_id", "obs_month"], how="left")
@@ -185,6 +164,7 @@ def compute_seasonal_departure(df):
 # Main pipeline
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--full-history", action="store_true")
@@ -199,12 +179,10 @@ def main():
 
     # Read from the dbt mart
     print("Reading from marts.mart_daily_weather …")
-    df = (
-        spark.read.jdbc(
-            JDBC_URL,
-            "marts.mart_daily_weather",
-            properties=JDBC_PROPS,
-        )
+    df = spark.read.jdbc(
+        JDBC_URL,
+        "marts.mart_daily_weather",
+        properties=JDBC_PROPS,
     )
 
     if not args.full_history:

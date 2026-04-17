@@ -1,6 +1,6 @@
 # ============================================================
 # Kestra Flow — Daily Weather Data Pipeline
-# Orchestrates: Ingest → dbt transform → Spark batch
+# Orchestrates: Ingest → Bruin (transform + quality)
 # ============================================================
 
 id: weather_daily_pipeline
@@ -8,9 +8,8 @@ namespace: weather.pipeline
 
 description: |
   End-to-end daily pipeline that:
-    1. Ingests the latest year of NOAA GHCN-Daily data into PostgreSQL
-    2. Runs dbt transformations (staging → marts)
-    3. Triggers Spark batch processing for prediction features
+    1. Ingests the latest year of NOAA GHCN-Daily data into DuckDB
+    2. Runs Bruin pipeline (staging → marts → quality checks)
 
 inputs:
   - id: year
@@ -25,15 +24,17 @@ inputs:
 
 tasks:
   # ----------------------------------------------------------
-  # 1. Ingest NOAA GHCN-Daily data
+  # 1. Ingest NOAA GHCN-Daily data into DuckDB
   # ----------------------------------------------------------
   - id: ingest_ghcn_data
     type: io.kestra.plugin.scripts.python.Script
-    description: "Download and load GHCN daily data into PostgreSQL"
+    description: "Download per-station GHCN .dly files and load into DuckDB"
     docker:
       image: python:3.11-slim
+      volumes:
+        - weather-data-pipeline_duckdb_data:/data
     beforeCommands:
-      - pip install requests psycopg2-binary pandas sqlalchemy tqdm
+      - pip install requests pandas duckdb
     inputFiles:
       ingest_ghcn.py: "{{ read('/app/scripts/ingestion/ingest_ghcn.py') }}"
     commands:
@@ -43,47 +44,24 @@ tasks:
         {% if inputs.force_reingest %}--force{% endif %}
         --skip-stations-meta
     env:
-      DATABASE_URL: "postgresql://weather:weather_pipeline_2026@postgres:5432/weather_warehouse"
+      DUCKDB_PATH: "/data/weather.duckdb"
 
   # ----------------------------------------------------------
-  # 2. Run dbt transformations
+  # 2. Run Bruin pipeline (transforms + quality)
   # ----------------------------------------------------------
-  - id: dbt_run
+  - id: bruin_run
     type: io.kestra.plugin.scripts.shell.Commands
-    description: "Run dbt models: staging → marts"
+    description: "Run Bruin pipeline: staging → marts → quality checks"
     docker:
-      image: ghcr.io/dbt-labs/dbt-postgres:1.7.0
+      image: weather-data-pipeline-bruin
+      volumes:
+        - weather-data-pipeline_duckdb_data:/data
     commands:
-      - cd /dbt/weather_dbt && dbt deps && dbt run --profiles-dir .
+      - bruin run /app/bruin --environment docker
     env:
-      DBT_PROFILES_DIR: /dbt/weather_dbt
-
-  # ----------------------------------------------------------
-  # 3. dbt tests
-  # ----------------------------------------------------------
-  - id: dbt_test
-    type: io.kestra.plugin.scripts.shell.Commands
-    description: "Run dbt tests to validate data quality"
-    docker:
-      image: ghcr.io/dbt-labs/dbt-postgres:1.7.0
-    commands:
-      - cd /dbt/weather_dbt && dbt test --profiles-dir .
-
-  # ----------------------------------------------------------
-  # 4. Spark batch — compute prediction features
-  # ----------------------------------------------------------
-  - id: spark_batch_features
-    type: io.kestra.plugin.scripts.shell.Commands
-    description: "Submit Spark job for weather prediction features"
-    commands:
-      - >
-        /opt/bitnami/spark/bin/spark-submit
-        --master spark://spark-master:7077
-        --deploy-mode client
-        /opt/spark-jobs/weather_features.py
+      DUCKDB_PATH: "/data/weather.duckdb"
 
 triggers:
-  # Run every day at 06:00 UTC
   - id: daily_schedule
     type: io.kestra.core.models.triggers.types.Schedule
     cron: "0 6 * * *"

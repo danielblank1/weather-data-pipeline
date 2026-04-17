@@ -1,28 +1,5 @@
 services:
   # ============================================================
-  # PostgreSQL — Data Warehouse
-  # ============================================================
-  postgres:
-    image: postgres:16-alpine
-    container_name: weather_postgres
-    environment:
-      POSTGRES_USER: weather
-      POSTGRES_PASSWORD: weather_pipeline_2026
-      POSTGRES_DB: weather_warehouse
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U weather -d weather_warehouse"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - weather_net
-
-  # ============================================================
   # Kestra — Workflow Orchestration
   # ============================================================
   kestra:
@@ -36,86 +13,12 @@ services:
       - kestra_data:/app/storage
       - ./kestra/flows:/app/flows
       - ./ingestion:/app/scripts/ingestion
-    environment:
-      KESTRA_CONFIGURATION: |
-        datasources:
-          postgres:
-            url: jdbc:postgresql://postgres:5432/weather_warehouse
-            driverClassName: org.postgresql.Driver
-            username: weather
-            password: weather_pipeline_2026
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - duckdb_data:/data
     networks:
       - weather_net
 
   # ============================================================
-  # Apache Spark — Batch Processing
-  # ============================================================
-  spark-master:
-    image: apache/spark:3.5.3-scala2.12-java17-python3-r-ubuntu
-    container_name: weather_spark_master
-    command: /opt/spark/sbin/start-master.sh
-    ports:
-      - "7077:7077"
-      - "8082:8080"
-    volumes:
-      - ./spark:/opt/spark-jobs
-      - spark_data:/opt/spark-data
-    networks:
-      - weather_net
-
-  spark-worker:
-    image: apache/spark:3.5.3-scala2.12-java17-python3-r-ubuntu
-    container_name: weather_spark_worker
-    command: /opt/spark/sbin/start-worker.sh spark://spark-master:7077
-    environment:
-      - SPARK_WORKER_MEMORY=2G
-      - SPARK_WORKER_CORES=2
-    depends_on:
-      - spark-master
-    volumes:
-      - ./spark:/opt/spark-jobs
-      - spark_data:/opt/spark-data
-    networks:
-      - weather_net
-
-  # ============================================================
-  # Kafka + Zookeeper — Streaming
-  # ============================================================
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.6.0
-    container_name: weather_zookeeper
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
-    networks:
-      - weather_net
-
-  kafka:
-    image: confluentinc/cp-kafka:7.6.0
-    container_name: weather_kafka
-    depends_on:
-      - zookeeper
-    ports:
-      - "9092:9092"
-      - "29092:29092"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-    networks:
-      - weather_net
-
-  # ============================================================
-  # Bruin — Data Ingestion & Quality Checks
+  # Bruin — Ingestion, Transform & Quality
   # ============================================================
   bruin:
     build:
@@ -124,39 +27,37 @@ services:
     container_name: weather_bruin
     volumes:
       - ./bruin:/app/bruin
+      - duckdb_data:/data
     environment:
       - BRUIN_ENV=docker
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - DUCKDB_PATH=/data/weather.duckdb
     networks:
       - weather_net
 
   # ============================================================
-  # Metabase — Dashboard / Visualization
+  # Streamlit — Dashboard
   # ============================================================
-  metabase:
-    image: metabase/metabase:latest
-    container_name: weather_metabase
+  streamlit:
+    build:
+      context: ./streamlit
+      dockerfile: Dockerfile
+    container_name: weather_streamlit
     ports:
-      - "3000:3000"
+      - "8501:8501"
+    volumes:
+      - duckdb_data:/data
+      - ./bruin/assets/transform:/transforms:ro
     environment:
-      MB_DB_TYPE: postgres
-      MB_DB_DBNAME: metabase
-      MB_DB_PORT: 5432
-      MB_DB_USER: weather
-      MB_DB_PASS: weather_pipeline_2026
-      MB_DB_HOST: postgres
+      - DUCKDB_PATH=/data/weather.duckdb
+      - TRANSFORMS_DIR=/transforms
     depends_on:
-      postgres:
-        condition: service_healthy
+      - bruin
     networks:
       - weather_net
 
 volumes:
-  postgres_data:
   kestra_data:
-  spark_data:
+  duckdb_data:
 
 networks:
   weather_net:

@@ -1,9 +1,22 @@
 # Environment
 .env
+.envrc
 *.pyc
 __pycache__/
 .venv/
 venv/
+env/
+ENV/
+
+# Python packaging
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+wheels/
 
 # Terraform
 terraform/.terraform/
@@ -11,15 +24,17 @@ terraform/*.tfstate
 terraform/*.tfstate.backup
 terraform/.terraform.lock.hcl
 
-# dbt
-dbt/weather_dbt/target/
-dbt/weather_dbt/dbt_packages/
-dbt/weather_dbt/logs/
+# dbt (replaced by Bruin)
+dbt/
 
 # Data
 *.csv
 *.csv.gz
 data/
+
+# DuckDB
+*.duckdb
+*.duckdb.wal
 
 # IDE
 .idea/
@@ -30,3 +45,33 @@ data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Bruin
+.bruin.yml
+logs/runs
+logs/*.log
+
+# Poetry / Python
+.python-version
+.ruff_cache/
+
+# Testing / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+coverage.xml
+
+# Jupyter
+.ipynb_checkpoints
+
+# Type checkers
+.mypy_cache/
+.pytype/
+.pyre/
+
+# Misc
+conversation_history.json

@@ -13,9 +13,9 @@ Usage:
 import json
 import logging
 import os
-from datetime import datetime
 
 import psycopg2
+
 from kafka import KafkaConsumer
 
 # ---------------------------------------------------------------------------
@@ -79,10 +79,7 @@ def write_batch_to_postgres(batch: list[dict]):
         VALUES (%s, %s, %s, %s)
     """
 
-    records = [
-        (msg["station_id"], msg["obs_date"], msg["element"], msg["data_value"])
-        for msg in batch
-    ]
+    records = [(msg["station_id"], msg["obs_date"], msg["element"], msg["data_value"]) for msg in batch]
 
     cur.executemany(insert_sql, records)
     conn.commit()
@@ -117,7 +114,8 @@ def consume():
                 batch = []
                 logger.info(
                     "Progress: %d consumed, %d invalid",
-                    total_consumed, total_invalid,
+                    total_consumed,
+                    total_invalid,
                 )
 
     except KeyboardInterrupt:
@@ -130,7 +128,8 @@ def consume():
         consumer.close()
         logger.info(
             "Consumer stopped. Total: %d consumed, %d invalid.",
-            total_consumed, total_invalid,
+            total_consumed,
+            total_invalid,
         )
 
 

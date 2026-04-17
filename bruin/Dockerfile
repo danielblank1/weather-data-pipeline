@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Install Bruin CLI
 RUN apt-get update && apt-get install -y curl && \
@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 WORKDIR /app/bruin
 
-# Default: validate and run the pipeline
+ENV DUCKDB_PATH=/data/weather.duckdb
+
 ENTRYPOINT ["bruin"]
-CMD ["run", "--environment", "docker"]
+CMD ["run", "--environment", "docker", "/app/bruin"]

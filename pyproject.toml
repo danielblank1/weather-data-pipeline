@@ -1,0 +1,49 @@
+[tool.poetry]
+name = "weather-data-pipeline"
+version = "0.1.0"
+description = "Ingests NOAA GHCN-Daily weather data, transforms into analytics-ready marts, and serves a prediction dashboard"
+authors = ["db"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+requests = ">=2.31.0"
+pandas = ">=2.1.0"
+duckdb = ">=0.10.0"
+
+[tool.poetry.group.ingestion]
+optional = true
+
+[tool.poetry.group.ingestion.dependencies]
+tqdm = ">=4.66.0"
+geopy = ">=2.4.0"
+
+[tool.poetry.group.streamlit]
+optional = true
+
+[tool.poetry.group.streamlit.dependencies]
+streamlit = ">=1.32.0"
+plotly = ">=5.20.0"
+geopy = ">=2.4.0"
+
+[tool.poetry.group.kafka]
+optional = true
+
+[tool.poetry.group.kafka.dependencies]
+kafka-python = ">=2.0.2"
+psycopg2-binary = ">=2.9.9"
+
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.15.11"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

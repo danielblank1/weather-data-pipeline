@@ -21,6 +21,7 @@ import time
 from datetime import datetime
 
 import psycopg2
+
 from kafka import KafkaProducer
 
 # ---------------------------------------------------------------------------
@@ -90,7 +91,9 @@ def produce_messages(producer, rows, speed_factor=10):
     """
     logger.info(
         "Starting producer: %d messages, speed=%dx, topic=%s",
-        len(rows), speed_factor, TOPIC,
+        len(rows),
+        speed_factor,
+        TOPIC,
     )
 
     sent = 0

@@ -1,14 +1,10 @@
 # ============================================================
-# Bruin Pipeline — Weather Data Ingestion & Quality
-# Handles data ingestion and quality validation alongside dbt
+# Bruin Pipeline — Weather Data Ingestion, Transform & Quality
 # ============================================================
 
-name: weather_ingestion_quality
+name: weather_pipeline
 schedule: daily
 start_date: "2024-01-01"
 
 default_connections:
-  postgres: "weather_warehouse"
-
-notifications:
-  slack: []
+  duckdb: "weather_warehouse"

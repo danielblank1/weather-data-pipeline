@@ -1,16 +1,16 @@
 /* @bruin
 name: quality.validate_raw_daily
-type: postgres.sql
+type: duckdb.sql
+connection: weather_warehouse
 depends:
-  - raw.ghcn_daily_ingest
+  - raw.ghcn_daily
+  - raw.ghcn_stations
 materialization:
   type: table
   strategy: create+replace
 
 description: >
   Data quality validation for the raw GHCN daily observations.
-  Creates a summary table of quality metrics that downstream
-  consumers and dashboards can monitor.
 
 columns:
   - name: check_name
@@ -36,56 +36,39 @@ custom_checks:
 
 WITH
 
--- Check 1: Null station IDs
 null_stations AS (
-    SELECT
-        'null_station_id' AS check_name,
+    SELECT 'null_station_id' AS check_name,
         COUNT(*) AS violation_count,
-        CASE
-            WHEN COUNT(*) = 0 THEN 'PASS'
-            ELSE 'FAIL'
-        END AS check_result,
+        CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS check_result,
         'Station ID should never be null' AS description
-    FROM raw.ghcn_daily
-    WHERE station_id IS NULL
+    FROM raw.ghcn_daily WHERE station_id IS NULL
 ),
 
--- Check 2: Null observation dates
 null_dates AS (
-    SELECT
-        'null_obs_date' AS check_name,
+    SELECT 'null_obs_date' AS check_name,
         COUNT(*) AS violation_count,
-        CASE
-            WHEN COUNT(*) = 0 THEN 'PASS'
-            ELSE 'FAIL'
-        END AS check_result,
+        CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS check_result,
         'Observation date should never be null' AS description
-    FROM raw.ghcn_daily
-    WHERE obs_date IS NULL
+    FROM raw.ghcn_daily WHERE obs_date IS NULL
 ),
 
--- Check 3: Future dates
 future_dates AS (
-    SELECT
-        'future_dates' AS check_name,
+    SELECT 'future_dates' AS check_name,
         COUNT(*) AS violation_count,
         CASE
-            WHEN COUNT(*) = 0 THEN 'PASS'
+            WHEN COUNT(*) = 0   THEN 'PASS'
             WHEN COUNT(*) < 100 THEN 'WARN'
             ELSE 'FAIL'
         END AS check_result,
         'Observation dates should not be in the future' AS description
-    FROM raw.ghcn_daily
-    WHERE obs_date > CURRENT_DATE
+    FROM raw.ghcn_daily WHERE obs_date > CURRENT_DATE
 ),
 
--- Check 4: Temperature range sanity (-90°C to 60°C → -900 to 600 tenths)
 extreme_temps AS (
-    SELECT
-        'extreme_temperatures' AS check_name,
+    SELECT 'extreme_temperatures' AS check_name,
         COUNT(*) AS violation_count,
         CASE
-            WHEN COUNT(*) = 0 THEN 'PASS'
+            WHEN COUNT(*) = 0  THEN 'PASS'
             WHEN COUNT(*) < 50 THEN 'WARN'
             ELSE 'FAIL'
         END AS check_result,
@@ -95,28 +78,19 @@ extreme_temps AS (
       AND (data_value < -900 OR data_value > 600)
 ),
 
--- Check 5: Negative precipitation
 negative_precip AS (
-    SELECT
-        'negative_precipitation' AS check_name,
+    SELECT 'negative_precipitation' AS check_name,
         COUNT(*) AS violation_count,
-        CASE
-            WHEN COUNT(*) = 0 THEN 'PASS'
-            ELSE 'FAIL'
-        END AS check_result,
+        CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS check_result,
         'Precipitation values should not be negative' AS description
-    FROM raw.ghcn_daily
-    WHERE element = 'PRCP'
-      AND data_value < 0
+    FROM raw.ghcn_daily WHERE element = 'PRCP' AND data_value < 0
 ),
 
--- Check 6: TMAX < TMIN for the same station/date
 temp_inversion AS (
-    SELECT
-        'temp_max_less_than_min' AS check_name,
+    SELECT 'temp_max_less_than_min' AS check_name,
         COUNT(*) AS violation_count,
         CASE
-            WHEN COUNT(*) = 0 THEN 'PASS'
+            WHEN COUNT(*) = 0   THEN 'PASS'
             WHEN COUNT(*) < 100 THEN 'WARN'
             ELSE 'FAIL'
         END AS check_result,
@@ -133,13 +107,12 @@ temp_inversion AS (
     ) inversions
 ),
 
--- Check 7: Data freshness — most recent data should be within 7 days
 data_freshness AS (
-    SELECT
-        'data_freshness' AS check_name,
-        EXTRACT(DAY FROM CURRENT_DATE - MAX(obs_date))::INT AS violation_count,
+    SELECT 'data_freshness' AS check_name,
+        COALESCE(DATEDIFF('day', MAX(obs_date), CURRENT_DATE), -1) AS violation_count,
         CASE
-            WHEN MAX(obs_date) >= CURRENT_DATE - INTERVAL '7 days' THEN 'PASS'
+            WHEN MAX(obs_date) IS NULL                               THEN 'FAIL'
+            WHEN MAX(obs_date) >= CURRENT_DATE - INTERVAL '7 days'  THEN 'PASS'
             WHEN MAX(obs_date) >= CURRENT_DATE - INTERVAL '30 days' THEN 'WARN'
             ELSE 'FAIL'
         END AS check_result,
@@ -147,13 +120,11 @@ data_freshness AS (
     FROM raw.ghcn_daily
 ),
 
--- Check 8: Orphan stations (observations for stations not in metadata)
 orphan_stations AS (
-    SELECT
-        'orphan_stations' AS check_name,
+    SELECT 'orphan_stations' AS check_name,
         COUNT(DISTINCT d.station_id) AS violation_count,
         CASE
-            WHEN COUNT(DISTINCT d.station_id) = 0 THEN 'PASS'
+            WHEN COUNT(DISTINCT d.station_id) = 0  THEN 'PASS'
             WHEN COUNT(DISTINCT d.station_id) < 50 THEN 'WARN'
             ELSE 'FAIL'
         END AS check_result,
@@ -163,8 +134,7 @@ orphan_stations AS (
     WHERE s.station_id IS NULL
 )
 
-SELECT check_name, violation_count, check_result, description, NOW() AS checked_at
-FROM null_stations
+SELECT check_name, violation_count, check_result, description, NOW() AS checked_at FROM null_stations
 UNION ALL SELECT *, NOW() FROM null_dates
 UNION ALL SELECT *, NOW() FROM future_dates
 UNION ALL SELECT *, NOW() FROM extreme_temps

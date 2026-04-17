@@ -1,260 +1,234 @@
 # Weather Data Pipeline
 
-An end-to-end data engineering project that ingests NOAA weather data, transforms it through a modern data stack, and produces prediction-ready features — all running locally with Docker.
+Ingests NOAA GHCN-Daily weather data into DuckDB, transforms it with Bruin, and serves a Streamlit dashboard supporting any US state, country, or city with rolling features and ML-ready prediction tables.
 
-Built following the [DataTalksClub Data Engineering Zoomcamp](https://github.com/DataTalksClub/data-engineering-zoomcamp) curriculum.
+## The Problem
+
+NOAA's Global Historical Climatology Network provides one of the richest public weather datasets in the world — daily observations from over 100,000 stations — but working with it is painful. The raw data is distributed across thousands of fixed-width text files with cryptic formatting, no consistent API, and files that range from 200KB to 170MB+. Getting from raw station files to a clean, queryable dataset with rolling averages, seasonal features, and cross-station comparisons typically requires stitching together multiple tools and a lot of manual data wrangling.
+
+This project solves that by providing a single pipeline that handles the full journey: download the data for any location you choose, transform it through staging and mart layers with built-in quality checks, and explore it through an interactive dashboard — all running locally with Docker.
+
+## What You Get
+
+- **Pick any location** — select a US state, country, or city from the dashboard and ingest weather data on demand
+- **Analytics-ready tables** — daily weather with rolling averages, monthly summaries, and ML feature tables with lag/seasonal encoding
+- **Data quality at every layer** — 18 automated checks across raw, staging, and mart tables (null detection, range validation, freshness, referential integrity)
+- **ML-ready output** — `mart_prediction_features` provides lag features, rolling stats, seasonal encoding, and a next-day temperature target column ready for scikit-learn
 
 ## Architecture
 
 ```
-NOAA GHCN-Daily (CSV)
-        │
-        ▼
-┌───────────────┐     ┌─────────────┐
-│  Bruin        │     │  Kafka      │
-│  Ingestion    │     │  Producer   │
-│  (Python)     │     │  (stream)   │
-└──────┬────────┘     └──────┬──────┘
-       │                     │
-       ▼                     ▼
-┌──────────────────────────────────┐
-│       PostgreSQL (Warehouse)     │
-│  raw → staging → marts schemas  │
-└──────┬───────────────────┬──────┘
-       │                   │
-       ▼                   ▼
-┌─────────────┐    ┌──────────────┐
-│  dbt        │    │  Spark       │
-│  (transform)│    │  (batch ML   │
-│             │    │   features)  │
-└──────┬──────┘    └──────┬───────┘
-       │                  │
-       ├──────────────────┘
-       ▼
-┌──────────────────────────────────┐
-│  Bruin Quality Checks            │
-│  (raw + staging + marts)         │
-└──────┬───────────────────────────┘
-       │
-       ▼
-┌──────────────────────────────────┐
-│         Metabase (Dashboard)     │
-└──────────────────────────────────┘
+NOAA GHCN-Daily (.dly files)
+        |
+        v
+  +-----------+       +-------------+       +------------+
+  | Ingestion | ----> |   DuckDB    | ----> | Streamlit  |
+  | (Python)  |       | raw/staging |       | Dashboard  |
+  +-----------+       |   /marts    |       +------------+
+                      +-------------+            :8501
+                           ^
+                           |
+                      +----------+
+                      |  Bruin   |
+                      | transform|
+                      | + quality|
+                      +----------+
 
-       Orchestrated by Kestra + Bruin
+              Orchestrated by Kestra (:8080)
 ```
+
+**Data flow:** `raw` -> `staging` -> `marts` -> `quality`
 
 ## Tech Stack
 
-| Layer              | Tool              | Purpose                              |
-|--------------------|-------------------|--------------------------------------|
-| Containerization   | Docker Compose    | Run all services locally             |
-| IaC                | Terraform         | Manage Docker resources declaratively|
-| Orchestration      | Kestra            | Schedule and chain pipeline tasks    |
-| Ingestion          | Bruin (Python)    | Download NOAA data with quality gates|
-| Quality            | Bruin (SQL)       | Data validation at every layer       |
-| Warehouse          | PostgreSQL        | Store raw, staging, and mart data    |
-| Transformation     | dbt               | SQL-based staging → mart models      |
-| Batch Processing   | Apache Spark      | Compute heavy ML features            |
-| Streaming          | Apache Kafka      | Simulate real-time weather data      |
-| Dashboard          | Metabase          | Interactive visualizations           |
+| Layer | Tool | Purpose |
+|-------|------|---------|
+| Database | DuckDB | Embedded columnar analytics (no server needed) |
+| Ingestion + Transforms | Bruin | Python ingestion assets + SQL transforms + quality checks |
+| Dashboard | Streamlit | Interactive UI with location selector and ingestion controls |
+| Orchestration | Kestra | Scheduling and pipeline chaining |
+| Dependencies | Poetry | Python dependency management with lock file |
+| CI/CD | GitHub Actions | Ruff linting, Bruin validation, Docker build checks |
+| Containerization | Docker Compose | Run all services locally |
 
 ## Data Source
 
-**NOAA Global Historical Climatology Network — Daily (GHCN-D)**
+[NOAA Global Historical Climatology Network - Daily (GHCN-Daily)](https://www.ncei.noaa.gov/products/land-based-station/global-historical-climatology-network-daily) — daily observations including:
 
-Over 100,000 weather stations worldwide, providing daily observations of:
-- `TMAX` / `TMIN` — max/min temperature (tenths of °C)
+- `TMAX` / `TMIN` — max/min temperature (tenths of degrees C)
 - `PRCP` — precipitation (tenths of mm)
 - `SNOW` / `SNWD` — snowfall / snow depth (mm)
 - `AWND` — average wind speed (tenths of m/s)
 
-Data is freely available from [NCEI](https://www.ncei.noaa.gov/products/land-based-station/global-historical-climatology-network-daily).
+Ingestion downloads per-station `.dly` files (~200KB each) rather than full yearly CSVs (~170MB+), completing in seconds per station.
+
+## Mart Tables
+
+| Table | Description |
+|-------|-------------|
+| `marts.mart_daily_weather` | Daily observations joined with station info and rolling features |
+| `marts.mart_monthly_summary` | Monthly aggregates per station |
+| `marts.mart_prediction_features` | ML features: lag, rolling stats, seasonal encoding, next-day target |
+
+## Prerequisites
+
+- [Docker](https://www.docker.com/) and Docker Compose
+- [Python 3.12+](https://www.python.org/)
+- [Poetry](https://python-poetry.org/docs/#installation)
+- [Bruin CLI](https://getbruin.com/) (optional, for local validation)
 
 ## Quick Start
 
-### Prerequisites
-- Docker & Docker Compose
-- Python 3.11+
-- [Bruin CLI](https://github.com/bruin-data/bruin) (`curl -LsSf https://getbruin.com/install/cli | sh`)
-- Make (optional, for convenience commands)
-
-### 1. Start services
+### 1. Install dependencies
 
 ```bash
-cp .env.example .env
-make up
-# or: docker compose up -d
+poetry install --with ingestion,streamlit,kafka
 ```
 
-### 2. Ingest data with Bruin
+### 2. Start services
 
 ```bash
-# Validate Bruin pipeline definitions
-make bruin-validate
-
-# Run Bruin ingestion (stations + yearly data)
-make bruin-ingest
-
-# Or use the original Python ingestion for backfill
-make ingest-backfill
+docker compose up -d --build
 ```
 
-### 3. Run transformations
+This starts:
+
+| Service | URL |
+|---------|-----|
+| Streamlit Dashboard | http://localhost:8501 |
+| Kestra UI | http://localhost:8080 |
+
+### 3. Ingest data
+
+Use the CLI to ingest weather data for a location:
 
 ```bash
-make dbt
-make dbt-test
+# By US state
+poetry run python ingestion/ingest_ghcn.py --years 2020 2021 2022 2023 2024 2025 --state AK
+
+# By country (NOAA FIPS code)
+poetry run python ingestion/ingest_ghcn.py --years 2020 2021 2022 2023 2024 2025 --country CA
+
+# By city (geocoded, with radius in km)
+poetry run python ingestion/ingest_ghcn.py --years 2020 2021 2022 2023 2024 2025 --city "Seattle, WA" --radius 50
+
+# By specific station IDs
+poetry run python ingestion/ingest_ghcn.py --years 2024 2025 --stations USW00026451 USW00026411
 ```
 
-### 4. Run Bruin quality checks
+Or use the **Ingest Location** button directly in the Streamlit dashboard.
+
+### 4. Run transforms and quality checks
 
 ```bash
-# Validate raw, staging, and mart data quality
-make bruin-quality
+make bruin-run
 ```
 
-### 5. Run Spark features
+The dashboard also runs transforms automatically after ingestion.
 
-```bash
-make spark
-```
+## Make Targets
 
-### 6. Set up dashboard
+Run `make help` to see all available targets:
 
-```bash
-make dashboard-views
-```
-
-Then open Metabase at http://localhost:3000, connect to PostgreSQL, and explore the pre-built views.
-
-### 7. Try streaming (optional)
-
-```bash
-# Terminal 1: start consumer
-make kafka-consume
-
-# Terminal 2: start producer
-make kafka-produce
-```
-
-## Access Points
-
-| Service       | URL                          |
-|---------------|------------------------------|
-| Kestra UI     | http://localhost:8080         |
-| Spark Master  | http://localhost:8082         |
-| Metabase      | http://localhost:3000         |
-| PostgreSQL    | `localhost:5432`              |
-| Kafka         | `localhost:9092`              |
+| Target | Description |
+|--------|-------------|
+| `make up` | Start all services |
+| `make up-build` | Rebuild images and start services |
+| `make down` | Stop all services |
+| `make ingest` | Ingest by state (`STATE=AK YEARS="2024 2025"`) |
+| `make ingest-country` | Ingest by country (`COUNTRY=CA YEARS="2024 2025"`) |
+| `make ingest-city` | Ingest by city (`CITY="Seattle, WA" RADIUS=50 YEARS="2024 2025"`) |
+| `make bruin-run` | Run full Bruin pipeline (transforms + quality) |
+| `make bruin-validate` | Validate Bruin pipeline definitions |
+| `make bruin-quality` | Run quality checks only |
+| `make bruin-transform` | Run transforms only |
+| `make duckdb-shell` | Open a DuckDB SQL shell |
+| `make clean` | Remove all volumes and data |
 
 ## Project Structure
 
 ```
-weather-data-pipeline/
-├── docker-compose.yml          # All services
-├── Makefile                    # Convenience commands
-├── .env.example                # Environment template
-├── docker/
-│   └── init-db.sql             # PostgreSQL schema setup
-├── bruin/
-│   ├── .bruin.yml              # Bruin project config + connections
-│   ├── Dockerfile              # Bruin Docker image
-│   ├── pipeline.yml            # Pipeline definition (schedule, defaults)
-│   └── assets/
-│       ├── ingestion/
-│       │   ├── ingest_ghcn_yearly.py    # Python: download + load GHCN data
-│       │   ├── ingest_stations.py       # Python: download station metadata
-│       │   └── requirements.txt
-│       └── quality/
-│           ├── validate_raw_daily.sql   # 8 quality checks on raw data
-│           ├── validate_stations.sql    # 5 checks on station metadata
-│           └── validate_marts.sql       # 5 checks on dbt mart outputs
-├── ingestion/
-│   ├── Dockerfile
-│   ├── ingest_ghcn.py          # Standalone NOAA downloader (backfill)
-│   └── requirements.txt
-├── kestra/
-│   └── flows/
-│       ├── weather_daily_pipeline.yml    # Daily orchestration
-│       └── weather_backfill.yml          # Historical backfill
-├── dbt/
-│   └── weather_dbt/
-│       ├── dbt_project.yml
-│       ├── profiles.yml
-│       ├── packages.yml
-│       └── models/
-│           ├── sources/sources.yml
-│           ├── staging/
-│           │   ├── stg_daily_observations.sql
-│           │   ├── stg_stations.sql
-│           │   └── schema.yml
-│           └── marts/
-│               ├── mart_daily_weather.sql
-│               ├── mart_monthly_summary.sql
-│               ├── mart_prediction_features.sql
-│               └── schema.yml
-├── spark/
-│   └── weather_features.py     # Batch ML feature engineering
-├── kafka/
-│   ├── weather_producer.py     # Simulated real-time feed
-│   ├── weather_consumer.py     # Stream-to-DB consumer
-│   └── requirements.txt
-├── dashboard/
-│   └── metabase_setup.sql      # Pre-built views
-└── terraform/
-    ├── main.tf                 # Docker resource management
-    └── variables.tf
+ingestion/
+  ingest_ghcn.py                # Standalone ingestion script (CLI + Kestra)
+
+bruin/
+  pipeline.yml                  # Bruin pipeline definition
+  assets/
+    ingestion/
+      ingest_stations.py        # Station metadata -> DuckDB
+      ingest_ghcn_yearly.py     # Per-station .dly download -> DuckDB
+    transform/
+      stg_daily_observations.sql    # Pivot raw long->wide, unit conversions
+      stg_stations.sql              # Station metadata + geographic enrichment
+      mart_daily_weather.sql        # Primary analytics table + rolling features
+      mart_monthly_summary.sql      # Monthly aggregations per station
+      mart_prediction_features.sql  # ML feature table (lag, rolling, seasonal)
+    quality/
+      validate_raw_daily.sql    # 8 quality checks on raw data
+      validate_stations.sql     # 5 quality checks on station metadata
+      validate_marts.sql        # 5 quality checks on mart tables
+
+streamlit/
+  app.py                        # Dashboard: 4 tabs + station map + ingestion UI
+  pipeline.py                   # Ingestion + transform logic
+
+kestra/flows/
+  weather_daily_pipeline.yml    # Daily scheduled pipeline
+  weather_backfill.yml          # On-demand multi-year backfill
 ```
 
-## dbt Model Lineage
+## Data Lineage
 
 ```
-raw.ghcn_daily ──► stg_daily_observations ──► mart_daily_weather ──► mart_prediction_features
-raw.ghcn_stations ──► stg_stations ──────────┘       │
-                                                      └──► mart_monthly_summary
+raw.ghcn_daily ----> stg_daily_observations ----> mart_daily_weather ----> mart_prediction_features
+raw.ghcn_stations -> stg_stations ----------/            |
+                                                         +-----------> mart_monthly_summary
 ```
 
-## Dashboard Suggestions
+## Quality Checks
 
-Pre-built SQL views in `dashboard/metabase_setup.sql` support these visualizations:
+Bruin SQL assets in `bruin/assets/quality/` validate data at every layer:
 
-1. **Latest Conditions Map** — pin map of current station readings
-2. **Temperature Trend** — line chart of daily temps with 7/30-day averages
-3. **Monthly Heatmap** — grid of station × month temperature/precipitation
-4. **Anomaly Tracker** — scatter plot highlighting unusual temperature days
-5. **Precipitation Summary** — bar chart of monthly rain/snow totals
+- **`validate_raw_daily`** — null station/date checks, future dates, temperature extremes, negative precipitation, TMAX/TMIN inversions, data freshness, orphan stations
+- **`validate_stations`** — coordinate ranges, duplicates, US state coverage, elevation range
+- **`validate_marts`** — tables populated, rolling averages computed, prediction targets exist, monthly coverage, station joins
 
-## Bruin Pipeline
+Each check produces a PASS/WARN/FAIL result stored in the `quality` schema.
 
-Bruin handles two responsibilities alongside dbt: data ingestion and data quality validation.
+## CI/CD
 
-### Ingestion assets (Python)
+GitHub Actions runs on every push to `main` and on pull requests:
 
-Bruin Python assets in `bruin/assets/ingestion/` download NOAA data and return DataFrames. Bruin handles writing to PostgreSQL automatically via the connection config, with built-in column-level quality checks that run after every load.
+| Job | Description |
+|-----|-------------|
+| **Ruff Lint & Format** | Python linting and format checking |
+| **Bruin Validate** | Pipeline definition validation |
+| **Docker Build** | Smoke-test image builds for Streamlit and Bruin |
 
-### Quality check assets (SQL)
-
-Three SQL validation assets in `bruin/assets/quality/` run checks across the entire pipeline:
-
-- `validate_raw_daily.sql` — 8 checks on raw data (nulls, future dates, temperature sanity, negative precipitation, TMAX/TMIN inversions, data freshness, orphan stations)
-- `validate_stations.sql` — 5 checks on station metadata (coordinate ranges, duplicates, US coverage, elevation range)
-- `validate_marts.sql` — 5 checks on dbt outputs (table populated, rolling averages computed, prediction targets exist, monthly coverage, station joins)
-
-Each check produces a PASS/WARN/FAIL result stored in the `quality` schema, which Metabase can display as a data quality dashboard.
-
-### Bruin commands
+## Development
 
 ```bash
-bruin validate .          # Check pipeline definitions
-bruin run .               # Run full pipeline
-bruin run --only <asset>  # Run a single asset
+# Install all dependencies (including dev tools)
+poetry install --with ingestion,streamlit,kafka
+
+# Lint
+poetry run ruff check .
+
+# Auto-fix lint issues
+poetry run ruff check --fix .
+
+# Format
+poetry run ruff format .
+
+# Validate Bruin pipeline
+bruin validate bruin/
+
+# Export requirements for Docker (after changing deps)
+poetry export --only=main,streamlit --without-hashes -f requirements.txt -o streamlit/requirements.txt
+poetry export --only=main --without-hashes -f requirements.txt -o bruin/assets/ingestion/requirements.txt
 ```
 
-## Extending the Project
+## Roadmap
 
-- **Add more NOAA elements**: Edit `CORE_ELEMENTS` in `ingest_ghcn.py`
-- **Filter to specific stations**: Use `--stations USW00094728` flag
-- **Add ML models**: The `mart_prediction_features` table is ready for scikit-learn / XGBoost
-- **Scale Spark**: Add more workers in `docker-compose.yml`
-- **Production deployment**: Swap PostgreSQL for BigQuery, add GCS for data lake
+- **ML prediction model** — train scikit-learn model on `mart_prediction_features`, write predictions to `marts.mart_predictions`, display in Streamlit
+- **Kestra end-to-end** — test orchestration flows with DuckDB volume mounts

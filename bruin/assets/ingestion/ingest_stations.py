@@ -1,55 +1,85 @@
 """@bruin
-name: raw.ghcn_stations_ingest
+name: raw.ghcn_stations
 type: python
 connection: weather_warehouse
 depends: []
 materialization:
-  type: table
-  strategy: create+replace
+  type: none
 
-columns:
-  - name: station_id
-    type: string
-    description: "11-character GHCN station ID"
-    checks:
-      - name: not_null
-      - name: unique
-  - name: latitude
-    type: float
-    description: "Station latitude"
-    checks:
-      - name: not_null
-  - name: longitude
-    type: float
-    description: "Station longitude"
-    checks:
-      - name: not_null
-  - name: station_name
-    type: string
-    description: "Human-readable station name"
-    checks:
-      - name: not_null
-
-custom_checks:
-  - name: "station count is reasonable"
-    description: "GHCN has 100k+ stations globally"
-    query: SELECT count(*) > 50000 FROM raw.ghcn_stations
-    value: 1
+description: "Download GHCN station metadata and load into DuckDB raw layer."
 @bruin"""
 
+import os
+
+import duckdb
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 GHCN_STATIONS_URL = "https://www.ncei.noaa.gov/pub/data/ghcn/daily/ghcnd-stations.txt"
+DUCKDB_PATH = os.getenv("DUCKDB_PATH", "/data/weather.duckdb")
 
 
-def materialize(context):
-    """
-    Download GHCN station metadata and return as DataFrame.
-    The fixed-width format is parsed positionally per NOAA spec.
-    """
+def _ensure_schema(conn):
+    conn.execute("CREATE SCHEMA IF NOT EXISTS raw")
+    conn.execute("CREATE SCHEMA IF NOT EXISTS staging")
+    conn.execute("CREATE SCHEMA IF NOT EXISTS marts")
+    conn.execute("CREATE SCHEMA IF NOT EXISTS quality")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS raw.ghcn_stations (
+            station_id   VARCHAR,
+            latitude     DOUBLE,
+            longitude    DOUBLE,
+            elevation    DOUBLE,
+            state        VARCHAR,
+            station_name VARCHAR,
+            gsn_flag     VARCHAR,
+            hcn_flag     VARCHAR,
+            wmo_id       VARCHAR
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS raw.ghcn_daily (
+            station_id  VARCHAR NOT NULL,
+            obs_date    DATE    NOT NULL,
+            element     VARCHAR NOT NULL,
+            data_value  INTEGER,
+            m_flag      VARCHAR,
+            q_flag      VARCHAR,
+            s_flag      VARCHAR,
+            obs_time    VARCHAR
+        )
+    """)
+
+
+def _safe_float(s: str):
+    s = s.strip()
+    if not s or s == "-999.9":
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _http_session() -> requests.Session:
+    session = requests.Session()
+    retry = Retry(
+        total=4,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"],
+    )
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    session.mount("http://", HTTPAdapter(max_retries=retry))
+    return session
+
+
+def materialize(context=None):
     print("Downloading GHCN station metadata ...")
-    resp = requests.get(GHCN_STATIONS_URL, timeout=120)
+    session = _http_session()
+    resp = session.get(GHCN_STATIONS_URL, timeout=120)
     resp.raise_for_status()
 
     rows = []
@@ -71,21 +101,14 @@ def materialize(context):
         )
 
     df = pd.DataFrame(rows)
-    print(f"Parsed {len(df):,} stations")
-
-    # Filter out stations with missing coordinates
     df = df.dropna(subset=["latitude", "longitude"])
-    print(f"After filtering: {len(df):,} stations with valid coordinates")
+    print(f"Parsed {len(df):,} stations with valid coordinates")
 
-    return df
-
-
-def _safe_float(s: str):
-    """Safely parse a float from a fixed-width field."""
-    s = s.strip()
-    if not s or s == "-999.9":
-        return None
-    try:
-        return float(s)
-    except ValueError:
-        return None
+    conn = duckdb.connect(DUCKDB_PATH)
+    _ensure_schema(conn)
+    conn.execute("DELETE FROM raw.ghcn_stations")
+    conn.register("stations_df", df)
+    conn.execute("INSERT INTO raw.ghcn_stations SELECT * FROM stations_df")
+    conn.unregister("stations_df")
+    conn.close()
+    print(f"Loaded {len(df):,} stations into DuckDB")

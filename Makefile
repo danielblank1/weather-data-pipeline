@@ -1,8 +1,9 @@
 # ============================================================
 # Weather Data Pipeline — Makefile
+# Stack: DuckDB · Bruin · Streamlit · Kestra
 # ============================================================
 
-.PHONY: help up down restart logs ingest dbt spark kafka-produce kafka-consume bruin clean
+.PHONY: help up down restart logs ingest bruin clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -15,10 +16,11 @@ help: ## Show this help
 up: ## Start all services
 	docker compose up -d
 	@echo "\n✓ Services starting. Access points:"
-	@echo "  Kestra UI:     http://localhost:8080"
-	@echo "  Spark Master:  http://localhost:8082"
-	@echo "  Metabase:      http://localhost:3000"
-	@echo "  PostgreSQL:    localhost:5432"
+	@echo "  Kestra UI:  http://localhost:8080"
+	@echo "  Dashboard:  http://localhost:8501"
+
+up-build: ## Rebuild images and start all services
+	docker compose up -d --build
 
 down: ## Stop all services
 	docker compose down
@@ -29,89 +31,55 @@ restart: ## Restart all services
 logs: ## Follow logs for all services
 	docker compose logs -f
 
-logs-%: ## Follow logs for a specific service (e.g., make logs-postgres)
+logs-%: ## Follow logs for a specific service (e.g., make logs-streamlit)
 	docker compose logs -f $*
 
 # ---------------------------------------------------------------------------
 # Data Pipeline
 # ---------------------------------------------------------------------------
 
-ingest: ## Run GHCN data ingestion (default: 2024-2025)
+ingest: ## Ingest data (usage: make ingest STATE=AK YEARS="2015 2016 2017 2018 2019 2020 2021 2022 2023 2024 2025")
 	cd ingestion && pip install -r requirements.txt && \
-	python ingest_ghcn.py --years 2024 2025
+	python ingest_ghcn.py --years $(YEARS) --state $(STATE)
 
-ingest-backfill: ## Backfill 10 years of data (2015-2025)
+ingest-country: ## Ingest by country (usage: make ingest-country COUNTRY=CA YEARS="2020 2021 2022 2023 2024 2025")
 	cd ingestion && pip install -r requirements.txt && \
-	python ingest_ghcn.py --years 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024 2025
+	python ingest_ghcn.py --years $(YEARS) --country $(COUNTRY)
 
-dbt: ## Run dbt models
-	cd dbt/weather_dbt && dbt deps && dbt run
-
-dbt-test: ## Run dbt tests
-	cd dbt/weather_dbt && dbt test
-
-dbt-docs: ## Generate and serve dbt docs
-	cd dbt/weather_dbt && dbt docs generate && dbt docs serve --port 8085
-
-spark: ## Submit Spark batch job
-	docker exec weather_spark_master \
-		/opt/spark/bin/spark-submit \
-		--master spark://spark-master:7077 \
-		/opt/spark-jobs/weather_features.py
-
-spark-full: ## Submit Spark batch job with full history
-	docker exec weather_spark_master \
-		/opt/spark/bin/spark-submit \
-		--master spark://spark-master:7077 \
-		/opt/spark-jobs/weather_features.py --full-history
+ingest-city: ## Ingest by city (usage: make ingest-city CITY="Seattle, WA" RADIUS=50 YEARS="2020 2021 2022 2023 2024 2025")
+	cd ingestion && pip install -r requirements.txt && \
+	python ingest_ghcn.py --years $(YEARS) --city "$(CITY)" --radius $(RADIUS)
 
 # ---------------------------------------------------------------------------
-# Bruin — Ingestion & Quality Checks
+# Bruin — Transform & Quality
 # ---------------------------------------------------------------------------
+
+bruin-run: ## Run full Bruin pipeline inside Docker
+	docker compose run --rm bruin run --environment docker /app/bruin
 
 bruin-validate: ## Validate Bruin pipeline definitions
-	cd bruin && bruin validate .
-
-bruin-run: ## Run full Bruin pipeline (ingest + quality checks)
-	cd bruin && bruin run .
-
-bruin-run-docker: ## Run Bruin pipeline inside Docker
-	docker compose run --rm bruin run --environment docker .
+	docker compose run --rm bruin validate /app/bruin
 
 bruin-quality: ## Run only Bruin quality check assets
-	cd bruin && bruin run --only quality.validate_raw_daily .
-	cd bruin && bruin run --only quality.validate_stations .
-	cd bruin && bruin run --only quality.validate_marts .
+	docker compose run --rm bruin run --environment docker /app/bruin --only checks
 
-bruin-ingest: ## Run only Bruin ingestion assets
-	cd bruin && bruin run --only raw.ghcn_daily_ingest .
-	cd bruin && bruin run --only raw.ghcn_stations_ingest .
+bruin-transform: ## Run only Bruin transform assets
+	docker compose run --rm bruin run --environment docker /app/bruin --only main
 
 # ---------------------------------------------------------------------------
-# Kafka Streaming
+# DuckDB
 # ---------------------------------------------------------------------------
 
-kafka-produce: ## Start Kafka weather producer
-	cd kafka && pip install -r requirements.txt && \
-	python weather_producer.py --speed 100 --limit 5000
-
-kafka-consume: ## Start Kafka weather consumer
-	cd kafka && pip install -r requirements.txt && \
-	python weather_consumer.py
-
-kafka-topic: ## Create Kafka topic
-	docker exec weather_kafka kafka-topics \
-		--create --topic weather.observations.raw \
-		--bootstrap-server localhost:29092 \
-		--partitions 3 --replication-factor 1
+duckdb-shell: ## Open a DuckDB shell on the data file
+	docker compose run --rm bruin /bin/sh -c "duckdb /data/weather.duckdb"
 
 # ---------------------------------------------------------------------------
-# Dashboard
+# Utilities
 # ---------------------------------------------------------------------------
 
-dashboard-views: ## Create Metabase-friendly views in PostgreSQL
-	docker exec -i weather_postgres \
-		psql -U weather -d weather_warehouse < dashboard/metabase_setup.sql
+clean: ## Remove all volumes and data (DESTRUCTIVE)
+	docker compose down -v
+	@echo "All volumes removed."
 
 # ---------------------------------------------------------------------------
 # Terraform
@@ -125,14 +93,3 @@ tf-plan: ## Plan Terraform changes
 
 tf-apply: ## Apply Terraform changes
 	cd terraform && terraform apply -auto-approve
-
-# ---------------------------------------------------------------------------
-# Utilities
-# ---------------------------------------------------------------------------
-
-psql: ## Open psql shell
-	docker exec -it weather_postgres psql -U weather -d weather_warehouse
-
-clean: ## Remove all volumes and data (DESTRUCTIVE)
-	docker compose down -v
-	@echo "All volumes removed."
