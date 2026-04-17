@@ -2,11 +2,9 @@
 
 Ingests NOAA GHCN-Daily weather data into DuckDB, transforms it with Bruin, and serves a Streamlit dashboard supporting any US state, country, or city with rolling features and ML-ready prediction tables.
 
-## The Problem
+## About
 
-NOAA's Global Historical Climatology Network provides one of the richest public weather datasets in the world — daily observations from over 100,000 stations — but working with it is painful. The raw data is distributed across thousands of fixed-width text files with cryptic formatting, no consistent API, and files that range from 200KB to 170MB+. Getting from raw station files to a clean, queryable dataset with rolling averages, seasonal features, and cross-station comparisons typically requires stitching together multiple tools and a lot of manual data wrangling.
-
-This project solves that by providing a single pipeline that handles the full journey: download the data for any location you choose, transform it through staging and mart layers with built-in quality checks, and explore it through an interactive dashboard — all running locally with Docker.
+NOAA's Global Historical Climatology Network is one of the richest public weather datasets in the world — daily observations from over 100,000 stations across the globe. This project makes that data accessible through a single pipeline that handles the full journey: pick any location, download the data, transform it through staging and mart layers with built-in quality checks, and explore it through an interactive dashboard — all running locally with Docker.
 
 ## What You Get
 
@@ -116,7 +114,7 @@ poetry run python ingestion/ingest_ghcn.py --years 2020 2021 2022 2023 2024 2025
 poetry run python ingestion/ingest_ghcn.py --years 2024 2025 --stations USW00026451 USW00026411
 ```
 
-Or use the **Ingest Location** button directly in the Streamlit dashboard.
+Or use the Streamlit dashboard to select a location and ingest directly from the UI.
 
 ### 4. Run transforms and quality checks
 
