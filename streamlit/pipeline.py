@@ -836,6 +836,64 @@ def already_ingested_stations(
 # ---------------------------------------------------------------------------
 
 
+def _safe_float(s: str):
+    s = s.strip()
+    if not s or s == "-999.9":
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def ingest_stations(
+    conn: duckdb.DuckDBPyConnection,
+    on_progress: Callable[[str], None] | None = None,
+):
+    """Download NOAA station metadata and load into DuckDB."""
+    if on_progress:
+        on_progress("Downloading station metadata…")
+    session = _http_session()
+    resp = session.get(GHCN_STATIONS_URL, timeout=120)
+    resp.raise_for_status()
+
+    rows = []
+    for line in resp.text.splitlines():
+        if len(line) < 72:
+            continue
+        rows.append(
+            {
+                "station_id": line[0:11].strip(),
+                "latitude": _safe_float(line[12:20]),
+                "longitude": _safe_float(line[21:30]),
+                "elevation": _safe_float(line[31:37]),
+                "state": line[38:40].strip() or None,
+                "station_name": line[41:71].strip(),
+                "gsn_flag": line[72:75].strip() or None,
+                "hcn_flag": line[76:79].strip() or None if len(line) > 76 else None,
+                "wmo_id": line[80:85].strip() or None if len(line) > 80 else None,
+            }
+        )
+
+    df = pd.DataFrame(rows)
+    df = df.dropna(subset=["latitude", "longitude"])
+
+    conn.execute("CREATE SCHEMA IF NOT EXISTS raw")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS raw.ghcn_stations (
+            station_id VARCHAR, latitude DOUBLE, longitude DOUBLE,
+            elevation DOUBLE, state VARCHAR, station_name VARCHAR,
+            gsn_flag VARCHAR, hcn_flag VARCHAR, wmo_id VARCHAR
+        )
+    """)
+    conn.execute("DELETE FROM raw.ghcn_stations")
+    conn.register("_stations_df", df)
+    conn.execute("INSERT INTO raw.ghcn_stations SELECT * FROM _stations_df")
+    conn.unregister("_stations_df")
+    if on_progress:
+        on_progress(f"Loaded {len(df):,} stations.")
+
+
 def _http_session() -> requests.Session:
     session = requests.Session()
     retry = Retry(

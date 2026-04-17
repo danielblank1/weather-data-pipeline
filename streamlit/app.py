@@ -386,7 +386,12 @@ year_range = (2020, CURRENT_YEAR)
 stations_meta_loaded = raw_stations_loaded()
 
 if not stations_meta_loaded:
-    st.sidebar.warning("No station metadata loaded yet. Use the Ingest button or run ingestion from the CLI.")
+    with st.spinner("Downloading station metadata…"):
+        try:
+            pipeline.ingest_stations(conn)
+            stations_meta_loaded = True
+        except Exception as e:
+            st.sidebar.error(f"Failed to download station metadata: {e}")
 
 if stations_meta_loaded:
     # ── Unified location flow: Country → State → City/Station ──
